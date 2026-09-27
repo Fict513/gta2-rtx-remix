@@ -495,6 +495,8 @@ void Renderer::DrawWorld(const Camera& camera) {
     device_->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     device_->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
+    IDirect3DTexture9* boundTexture = nullptr;
+    bool textureBound = false;
     for (const TileBatch& batch : batches_) {
         if (batch.needsAlphaTest != alphaTestEnabled) {
             alphaTestEnabled = batch.needsAlphaTest;
@@ -507,7 +509,11 @@ void Renderer::DrawWorld(const Camera& camera) {
             device_->SetRenderState(D3DRS_ALPHABLENDENABLE,
                                     (blending && alphaTestEnabled) ? TRUE : FALSE);
         }
-        device_->SetTexture(0, textures_[batch.tile]);
+        if (!textureBound || textures_[batch.tile] != boundTexture) {
+            boundTexture = textures_[batch.tile];
+            device_->SetTexture(0, boundTexture);
+            textureBound = true;
+        }
         device_->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, batch.vertexStart, batch.vertexCount,
                                       batch.indexStart, batch.indexCount / 3);
         stats_.drawCalls++;

@@ -166,18 +166,23 @@ constexpr float kDegreesToRadians = 3.14159265f / 180.0f;
 // mode - the one the display will go back to - is used instead. As deployed it
 // cannot arise anyway, because configure_game.py asserts dxwrapper's
 // EnableWindowMode and GTA2 then never changes the mode at all.
-void DesktopSize(int* width, int* height) {
+void DesktopSize(HWND window, int* width, int* height) {
     // Anything smaller than this is GTA2's own screen, not a desktop.
     const DWORD kMinDesktopWidth = 800;
     const DWORD kMinDesktopHeight = 600;
 
     // DWORD, not int: ENUM_CURRENT_SETTINGS and ENUM_REGISTRY_SETTINGS are
     // (DWORD)-1 and (DWORD)-2, which narrow.
+    MONITORINFOEXA monitor = {};
+    monitor.cbSize = sizeof(monitor);
+    const bool haveMonitor = window && GetMonitorInfoA(
+        MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor);
+    const char* device = haveMonitor ? monitor.szDevice : nullptr;
     const DWORD modes[2] = {ENUM_CURRENT_SETTINGS, ENUM_REGISTRY_SETTINGS};
     for (DWORD which : modes) {
         DEVMODEA mode = {};
         mode.dmSize = sizeof(mode);
-        if (EnumDisplaySettingsA(nullptr, which, &mode) && mode.dmPelsWidth >= kMinDesktopWidth
+        if (EnumDisplaySettingsA(device, which, &mode) && mode.dmPelsWidth >= kMinDesktopWidth
             && mode.dmPelsHeight >= kMinDesktopHeight) {
             *width = static_cast<int>(mode.dmPelsWidth);
             *height = static_cast<int>(mode.dmPelsHeight);
@@ -186,8 +191,10 @@ void DesktopSize(int* width, int* height) {
     }
     // Last, and the one that is wrong on a scaled desktop - but a window that is
     // too small still shows all of itself, which is the better failure.
-    *width = GetSystemMetrics(SM_CXSCREEN);
-    *height = GetSystemMetrics(SM_CYSCREEN);
+    *width = haveMonitor ? monitor.rcMonitor.right - monitor.rcMonitor.left
+                         : GetSystemMetrics(SM_CXSCREEN);
+    *height = haveMonitor ? monitor.rcMonitor.bottom - monitor.rcMonitor.top
+                          : GetSystemMetrics(SM_CYSCREEN);
 }
 
 std::string GameDirectory() {
@@ -373,15 +380,21 @@ HWND CreatePresentWindow(HWND gameWindow, int width, int height, PresentWindow m
     // a scaled desktop GetSystemMetrics answers a different question - see
     // DesktopSize - and mixing the two here put the window half off the screen.
     int screenW = 0, screenH = 0;
-    DesktopSize(&screenW, &screenH);
+    DesktopSize(gameWindow, &screenW, &screenH);
+    MONITORINFO monitor = {};
+    monitor.cbSize = sizeof(monitor);
+    const bool haveMonitor = GetMonitorInfoA(
+        MonitorFromWindow(gameWindow, MONITOR_DEFAULTTONEAREST), &monitor);
+    const int monitorLeft = haveMonitor ? monitor.rcMonitor.left : 0;
+    const int monitorTop = haveMonitor ? monitor.rcMonitor.top : 0;
     if (width >= screenW && height >= screenH) {
-        left = 0;
-        top = 0;
+        left = monitorLeft;
+        top = monitorTop;
     } else {
-        if (left + width > screenW) left = (screenW - width) / 2;
-        if (top + height > screenH) top = (screenH - height) / 2;
-        if (left < 0) left = 0;
-        if (top < 0) top = 0;
+        if (left + width > monitorLeft + screenW || left < monitorLeft)
+            left = monitorLeft + (screenW - width) / 2;
+        if (top + height > monitorTop + screenH || top < monitorTop)
+            top = monitorTop + (screenH - height) / 2;
     }
     HWND window = CreateWindowExA(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
                                   "gta2dx9_present", "GTA2", WS_POPUP, left, top, width, height,
@@ -498,7 +511,7 @@ bool WorldView::Initialize(HWND window, int width, int height, std::string* erro
     // scales that to whatever it is drawn into. So the render size is ours to
     // choose, and defaults to the desktop rather than to GTA2's 640x480.
     int desktopW = 0, desktopH = 0;
-    DesktopSize(&desktopW, &desktopH);
+    DesktopSize(window, &desktopW, &desktopH);
     width_ = requestedWidth_ > 0 ? requestedWidth_ : desktopW;
     height_ = requestedHeight_ > 0 ? requestedHeight_ : desktopH;
     if (width_ < 320 || height_ < 240) {
